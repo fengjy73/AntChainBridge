@@ -39,3 +39,17 @@ plus the existing consensus fixtures.
 
 Deploy the collector and each committee member's HCDVS plugin together. Keep
 backups per component; do not rewrite pending proof records during rollback.
+
+## Deployment regression (2026-09-04)
+
+The corresponding downstream collector/HCDVS fix was deployed together on the
+Plugin Server and all four PTC nodes. All 96 original ordinary burst messages
+completed, including 93 previously blocked messages. Every original UCP's stored
+raw_message fingerprint remained identical; there was no source re-submission or
+forced proof state. Four newly collected messages (two ordinary, two regulated)
+also completed. Later transactions in those blocks exercised global/local index
+pairs 2/0 and 4/1. Target business receipts contained the expected payload once.
+
+These are downstream deployment observations, not a claim that this upstream
+branch's artifact was installed. This PR preserves upstream consensus/light-client
+changes and adds no regulatory-specific implementation.
