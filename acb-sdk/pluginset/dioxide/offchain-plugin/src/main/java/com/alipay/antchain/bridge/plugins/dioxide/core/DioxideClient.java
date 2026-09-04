@@ -179,6 +179,14 @@ public class DioxideClient {
             return crossChainMessageReceipt;
         }
 
+        TxFinalityResult finality = evaluateTxFinalityWithRelays(dioxideTransaction);
+        if (finality.state() != TxFinalityState.FINALIZED) {
+            crossChainMessageReceipt.setConfirmed(finality.state() == TxFinalityState.FAILED);
+            crossChainMessageReceipt.setSuccessful(false);
+            crossChainMessageReceipt.setTxhash(dioxideTransaction.getTxHash());
+            crossChainMessageReceipt.setErrorMsg("transaction execution " + finality.state() + ": " + finality.txHash());
+            return crossChainMessageReceipt;
+        }
         // check if tx0 is confirmed
         Long currHeight = queryLatestHeight();
         if (dioxideTransaction.getHeight() == null || dioxideTransaction.getHeight().compareTo(currHeight) > 0) {
@@ -201,16 +209,12 @@ public class DioxideClient {
         // check if tx2(contain recvMessageInProtocol event txHash) in tx1 is confirmed and successful
         List<String> tx2Hashes = dioxideTransaction.getInvocation().getRelays().stream()
                 .filter(Objects::nonNull)
-                .map(s -> {
-                    int idx = s.indexOf(':');
-                    return idx >= 0 ? s.substring(0, idx) : s;
-                })
                 .distinct()
                 .toList();
         for (String tx2Hash : tx2Hashes) {
-            JSONObject tx2 = getTransactionJonObjectByHash(tx2Hash);
+            JSONObject tx2 = scopeRelayGroup(getTransactionJonObjectByHash(normalizeRelayTxHash(tx2Hash)), tx2Hash);
             // check if tx3 (is recvMessageInProtocol event tx) in tx2 is confirmed and successful
-            JSONArray eventRelays = tx2.getJSONArray("Relays");
+            JSONArray eventRelays = tx2 == null ? null : tx2.getJSONArray("Relays");
             if (CollUtil.isEmpty(eventRelays)) {
                 crossChainMessageReceipt.setConfirmed(false);
                 crossChainMessageReceipt.setSuccessful(true);
@@ -224,7 +228,7 @@ public class DioxideClient {
                     // find recvMessageInProtocol event
                     List<String> tx3Hashes = eventTx.getInvocation().getRelays();
                     for (String tx3Hash : tx3Hashes) {
-                        DioxideTransaction dtx = getTransactionByHash(tx3Hash);
+                        DioxideTransaction dtx = scopeTransactionReference(getTransactionByHash(normalizeRelayTxHash(tx3Hash)), tx3Hash);
                         if (dtx != null && StrUtil.isNotEmpty(dtx.getTarget()) && dtx.getTarget().equals(DioxideClient.RECV_MESSAGE_IN_PROTOCOL)) {
                             crossChainMessageReceipt.setConfirmed(true);
                             crossChainMessageReceipt.setSuccessful(true);
@@ -849,6 +853,7 @@ public class DioxideClient {
 
         Queue<DioxideTransaction> queue = new ArrayDeque<>();
         Set<String> queuedTxHashes = new HashSet<>();
+        Map<String, DioxideTransaction> resolvedGroups = new HashMap<>();
         queue.add(dioxideTransaction);
         if (StrUtil.isNotEmpty(dioxideTransaction.getTxHash())) {
             queuedTxHashes.add(normalizeRelayTxHash(dioxideTransaction.getTxHash()));
@@ -885,10 +890,13 @@ public class DioxideClient {
                     }
                     continue;
                 }
-                if (!queuedTxHashes.add(relayTxHash)) {
+                if (!queuedTxHashes.add(relayTxReference)) {
                     continue;
                 }
-                DioxideTransaction relayTx = transactionResolver.apply(relayTxHash);
+                if (!resolvedGroups.containsKey(relayTxHash)) {
+                    resolvedGroups.put(relayTxHash, transactionResolver.apply(relayTxHash));
+                }
+                DioxideTransaction relayTx = scopeTransactionReference(resolvedGroups.get(relayTxHash), relayTxReference);
                 if (relayTx == null) {
                     if (pendingResult == null) {
                         pendingResult = new TxFinalityResult(TxFinalityState.PENDING, relayTxHash, "");
@@ -906,6 +914,37 @@ public class DioxideClient {
                         dioxideTransaction.getConfirmState()
                 )
                 : pendingResult;
+    }
+
+    /** A group may contain many unrelated business transactions: preserve its indexed member. */
+    static DioxideTransaction scopeTransactionReference(DioxideTransaction group, String reference) {
+        if (group == null || reference == null) { return null; }
+        int separator = reference.indexOf(':');
+        if (separator < 0) { return group; }
+        try {
+            int index = Integer.parseInt(reference.substring(separator + 1));
+            if (index < 0 || group.getEmbeddedRelays() == null || index >= group.getEmbeddedRelays().size()) { return null; }
+            DioxideTransaction member = group.getEmbeddedRelays().get(index);
+            if (member == null) { return null; }
+            return DioxideTransaction.builder().txHash(reference).state(group.getState())
+                    .confirmState(group.getConfirmState()).target(member.getTarget()).embeddedRelays(List.of(member)).build();
+        } catch (NumberFormatException e) { return null; }
+    }
+
+    static JSONObject scopeRelayGroup(JSONObject group, String reference) {
+        if (group == null || reference == null) { return null; }
+        int separator = reference.indexOf(':');
+        if (separator < 0) { return group; }
+        try {
+            int index = Integer.parseInt(reference.substring(separator + 1));
+            JSONArray members = group.getJSONArray("Relays");
+            if (index < 0 || members == null || index >= members.size()) { return null; }
+            JSONObject result = new JSONObject(group);
+            JSONArray selected = new JSONArray();
+            selected.add(members.get(index));
+            result.put("Relays", selected);
+            return result;
+        } catch (NumberFormatException e) { return null; }
     }
 
     static String normalizeRelayTxHash(String relayTxReference) {
