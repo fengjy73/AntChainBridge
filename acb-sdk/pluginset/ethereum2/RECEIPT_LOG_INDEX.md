@@ -32,7 +32,7 @@ mvn -f acb-sdk/pluginset/ethereum2/offchain-plugin/pom.xml \
   -Dtest=EthereumReceiptLogIndexTest,EthereumCollectorLogIndexTest,EthereumReceiptProofCompatibilityTest,EthereumHcdvsTest test
 ```
 
-19 tests cover both real collector methods with mocked RPC, multiple transactions
+23 tests cover both real collector methods with mocked RPC, multiple transactions
 per block, multiple AM events per transaction, legacy proof compatibility,
 explicit-index failures, ambiguity, malformed metadata and root/message tampering,
 plus the existing consensus fixtures.
