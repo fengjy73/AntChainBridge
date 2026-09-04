@@ -31,6 +31,10 @@ Python: pip install this directory, wrap the SDK DioxClient in CoordinatedDioxCl
 stable operation_id for each resumable operation. The wrapper does not monkey-patch unrelated
 SDK instances. Stop using direct SDK writes with the same signing account.
 
+Funding and dapp creation also use the coordinator and explicit stage operation IDs. Failed
+dapp waits raise an error rather than reporting synchronous success. This release does not
+invoke those administrative operations.
+
 ## Semantics and recovery
 
 - The allocation key is network + effective sender/delegatee; Ed25519 suffixes normalize.
@@ -58,7 +62,16 @@ all coordination records; do not reopen known-unsafe concurrent old writers.
 Use an isolated MySQL database. Set Maven isn.test.jdbc for JdbcTransactionCoordinatorTest.
 Set ISN_TEST_MYSQL=1 for Python tests; JAVA_PROBE_JAVA and JAVA_PROBE_CLASSPATH enable the
 mixed Java/Python process test and recovery from a Java process exiting after signing commit.
+The same suite exercises exit before signing commit (rollback), plus 32 shared-mailbox queries
+from two Java and two Python processes. Fixture tables are created only in the isolated test DB.
 Run DioxideIsnFinalityTest explicitly with -Dexec.skip=true; do not run live BBC tests against
 production credentials. Build the Relayer with Java 8 and Dioxide with Java 21.
 
 This change contains no regulatory contract code, contract deployment or historical replay.
+
+## Indexed relay groups
+
+A relay group can contain unrelated business transactions. Preserve the full groupHash:index
+reference and inspect only that array member. Cache the original group without mutating it:
+Fastjson JSONObject(Map) aliases the input map rather than copying it. The full RPC JSON
+receipt test checks two referenced members while ignoring an unrelated failing member.
